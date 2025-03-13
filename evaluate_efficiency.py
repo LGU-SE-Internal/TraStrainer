@@ -1,13 +1,13 @@
 import time
-import numpy as np
-from TraStrainer import tra_strainer, process_metrics, read_traces
-from baseline import random_sampling, sifter_sampling, sieve_sampling, wt_sampling
-from baseline import read_traces as read_traces2
 
-data_file = './data/hipster/test/0822/'
+from baseline import random_sampling, sieve_sampling, sifter_sampling, wt_sampling
+from baseline import read_traces as read_traces2
+from TraStrainer import process_metrics, read_traces, tra_strainer
+
+data_file = "./data/test/"
 metrics = process_metrics(data_file)
 traces0 = read_traces(data_file)
-origin_traces, processed_traces = read_traces2(data_file + 'trace/')
+origin_traces, processed_traces = read_traces2(data_file + "trace/")
 
 processed_traces = processed_traces[:2000]
 traces = {}
@@ -28,8 +28,10 @@ for sampling_rate in [0.001, 0.01, 0.025, 0.05, 0.1]:
     e = time.time()
     wt_result = wt_sampling(processed_traces, sampling_rate)
     f = time.time()
-    print(f"sampling_rate:{sampling_rate}, tra_strainer:{round(b - a, 5)}s, random:{round(c - b, 5)}s, "
-          f"sifter:{round(d - c, 5)}s, sieve:{round(e - d, 5)}s, wt:{round(f - e, 5)}s")
+    print(
+        f"sampling_rate:{sampling_rate}, tra_strainer:{round(b - a, 5)}s, random:{round(c - b, 5)}s, "
+        f"sifter:{round(d - c, 5)}s, sieve:{round(e - d, 5)}s, wt:{round(f - e, 5)}s"
+    )
 
 for metric_dimention in range(0, 11):
     key_num = int(round(len(list(metrics.keys())) * metric_dimention / 10))

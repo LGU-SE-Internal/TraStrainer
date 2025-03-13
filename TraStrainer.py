@@ -273,6 +273,8 @@ def tra_strainer(traces, metrics, budget_sample_rate):
     sample_trace_ids = []
     time_used = []
     for trace_id, trace in traces.items():
+
+
         start_time = time.time()
         data_dict, resource_dict, tree = process_trace(trace)
         trace_structure = get_seq_span(trace, tree)
@@ -286,9 +288,9 @@ def tra_strainer(traces, metrics, budget_sample_rate):
             if is_sample:
                 cur_sample_cnt += 1
                 sample_trace_ids.append(trace_id)
-            print(f"TraceID:{trace_id}\t SystemRate:{print_num(system_rate)}/{print_num(system_random)}\t "
-                  f"DiversityRate:{print_num(diversity_rate)}/{print_num(diversity_random)}\t IsAnd:"
-                  f"{1 if strict else 0}\t Sample:{is_sample}\t CurSampleRate:{print_num(cur_sample_cnt / cnt)}")
+            #print(f"TraceID:{trace_id}\t SystemRate:{print_num(system_rate)}/{print_num(system_random)}\t "
+            #      f"DiversityRate:{print_num(diversity_rate)}/{print_num(diversity_random)}\t IsAnd:"
+            #      f"{1 if strict else 0}\t Sample:{is_sample}\t CurSampleRate:{print_num(cur_sample_cnt / cnt)}")
         history_trace_structures.append(trace_structure)
         trace_vectors.append(output_dict(trace_metric))
         for key in metrics.keys():
@@ -296,6 +298,7 @@ def tra_strainer(traces, metrics, budget_sample_rate):
         cnt += 1
         end_time = time.time()
         time_used.append(end_time - start_time)
+        #print(f"TraceID:{trace_id}\t TimeUsed:{print_num(end_time - start_time)}")
         if cnt >= int(round(budget_sample_rate * len(traces))):
             break
     return sample_trace_ids
