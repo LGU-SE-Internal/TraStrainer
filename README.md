@@ -7,21 +7,66 @@ We introduce TraStrainer, an online sampler that takes into account both system 
 
 ![The overview of TraStrainer](./pic/overview.png)
 
-## How to run it
-### Environment Requirements
-- python >=3.9
-- numpy==1.23.2
-- pandas==1.4.3
-- scikit-learn==1.3.0
-- torch==1.9.0
-- treelib==1.7.0
+## Installation
 
-Python package requirements can be installed by `pip install -r requirements.txt`
+This project uses [uv](https://docs.astral.sh/uv/) as the package manager.
 
-### Run demo
-Run TraStrainer sampler:
+### Prerequisites
+- Python >=3.13 (managed by uv)
+- [uv](https://docs.astral.sh/uv/getting-started/installation/) package manager
+
+### Install with uv
+```bash
+# Clone the repository
+git clone <repository-url>
+cd TraStrainer
+
+# Install dependencies
+uv sync
+
+# Or install with development dependencies
+uv sync --dev
 ```
-python sampler.py --path './data/test' --rate 0.1
+
+## Quick Start
+
+### CLI Usage
+```bash
+# Show help
+uv run trastrainer --help
+
+# Display algorithm information
+uv run trastrainer info
+
+# Validate data folder
+uv run trastrainer validate data/
+
+# Run sampling
+uv run trastrainer sample data/ --rate 0.1 --verbose
+
+# Different output formats
+uv run trastrainer sample data/ --rate 0.1 --format json
+uv run trastrainer sample data/ --rate 0.1 --format csv
+uv run trastrainer sample data/ --rate 0.1 --format simple
+```
+
+### Task Runner
+Use the included task runner for common operations:
+```bash
+# Show available tasks
+uv run python tasks.py help
+
+# Install dependencies
+uv run python tasks.py setup
+
+# Run tests
+uv run python tasks.py test
+
+# Format code
+uv run python tasks.py format
+
+# Run example
+uv run python tasks.py example
 ```
 
 Explanations of parameters:
