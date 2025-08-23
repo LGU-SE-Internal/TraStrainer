@@ -152,8 +152,6 @@ def load_traces(input_folder: Path) -> pl.LazyFrame:
     anomal_traces = pl.scan_parquet(input_folder / "abnormal_traces.parquet")
     lf = merge_two_time_ranges(normal_traces, anomal_traces)
 
-    lf = tt_add_op_name(lf)
-
     status_code_values = ["Unset", "Ok", "Error"]
     lf = lf.with_columns(
         replace_enum_values("attr.status_code", status_code_values, start=0),
@@ -170,6 +168,7 @@ def load_traces(input_folder: Path) -> pl.LazyFrame:
     df = lf.collect()
     df = ui_span_name_parser(df)
     lf = df.lazy()
+    lf = tt_add_op_name(lf)
 
     return lf
 
