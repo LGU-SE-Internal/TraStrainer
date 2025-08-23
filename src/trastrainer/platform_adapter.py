@@ -140,7 +140,7 @@ class TraStrainer(Algorithm):
         """
         try:
             # Extract input folder from args (use getattr for safety)
-            input_folder = Path(getattr(args, "data_path", "./data"))
+            input_folder = args.input_folder
 
             # Run TraStrainer
             adapter = TraStrainerAdapter(sampling_rate=self.sampling_rate)
