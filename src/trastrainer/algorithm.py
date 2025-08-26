@@ -68,16 +68,16 @@ class FeatureExtractor:
         basic_features = []
 
         for span in trace.spans:
-            # Create feature string for each span
+            # Create feature string for each span, handling None values
             feature_string = "-".join(
                 [
                     str(tree.depth(span.span_id))
                     if tree.contains(span.span_id)
                     else "0",
-                    span.service_name,
-                    span.operation_name,
-                    span.status,
-                    str(int(span.duration / 1e4)),
+                    span.service_name or "unknown-service",
+                    span.operation_name or "unknown-operation",
+                    span.status or "unknown-status",
+                    str(int(span.duration / 1e4)) if span.duration else "0",
                 ]
             )
             basic_features.append(feature_string)

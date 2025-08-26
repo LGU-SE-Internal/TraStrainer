@@ -454,8 +454,9 @@ class PolarDataPreprocessor:
                     trace_id=trace_id,
                     span_id=row["span_id"],
                     parent_id=row.get("parent_span_id", "root") or "root",
-                    service_name=row["service_name"],
-                    operation_name=row.get("operation_name", row.get("span_name", "")),
+                    service_name=row["service_name"] or "unknown-service",
+                    operation_name=row.get("operation_name", row.get("span_name", ""))
+                    or "unknown-operation",
                     start_time=row["time"].isoformat() if row["time"] else "",
                     end_time=(
                         row["time"]
