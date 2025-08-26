@@ -89,6 +89,13 @@ def load_metrics(input_folder: Path) -> pl.LazyFrame:
     normal_metrics = pl.scan_parquet(input_folder / "normal_metrics.parquet")
     anomal_metrics = pl.scan_parquet(input_folder / "abnormal_metrics.parquet")
     lf = merge_two_time_ranges(normal_metrics, anomal_metrics)
+
+    # Apply unit conversions
+    lf = process_metric_units(lf)
+
+    # Select only the 4 core columns needed for metrics
+    lf = lf.select(["time", "metric", "value", "service_name"])
+
     return lf
 
 
@@ -100,6 +107,23 @@ def is_special_constant_metric(metric: str) -> bool:
         "k8s.container.cpu_limit",
         "k8s.container.memory_limit",
     )
+
+
+def process_metric_units(lf: pl.LazyFrame) -> pl.LazyFrame:
+    """Process metric units and convert to appropriate scales"""
+    # Convert CPU utilization to percentage (multiply by 100)
+    lf = lf.with_columns(
+        pl.when(pl.col("metric") == "k8s.pod.cpu_limit_utilization")
+        .then(pl.col("value") * 100)
+        .when(pl.col("metric") == "k8s.pod.memory_limit_utilization")
+        .then(pl.col("value") * 100)
+        .when(pl.col("metric") == "k8s.pod.memory.usage")
+        .then(pl.col("value") / 1024 / 1024)  # Convert bytes to MB
+        .otherwise(pl.col("value"))
+        .alias("value")
+    )
+
+    return lf
 
 
 @timeit()
@@ -189,6 +213,39 @@ def load_logs(input_folder: Path) -> pl.LazyFrame:
     return lf
 
 
+def compute_trace_duration_metrics(traces_lf: pl.LazyFrame) -> pl.LazyFrame:
+    """Compute P90 duration metrics per service per minute from trace data"""
+    # Convert time to minute-level buckets and compute trace duration P90
+    duration_metrics = (
+        traces_lf.with_columns(
+            [
+                # Extract minute timestamp from time column
+                pl.col("time").dt.truncate("1m").alias("time_bucket"),
+                # Use duration directly
+                pl.col("duration").alias("duration_value"),
+            ]
+        )
+        .group_by(["service_name", "time_bucket"])
+        .agg(
+            [
+                # Calculate P90 duration per service per minute
+                pl.col("duration_value").quantile(0.9).alias("value")
+            ]
+        )
+        .with_columns(
+            [
+                # Add metric name
+                pl.lit("trace_duration_p90").alias("metric"),
+                # Rename time_bucket to time to match metrics format
+                pl.col("time_bucket").alias("time"),
+            ]
+        )
+        .select(["time", "metric", "value", "service_name"])
+    )
+
+    return duration_metrics
+
+
 class PolarDataPreprocessor:
     """Data preprocessor for Polars-based data format"""
 
@@ -222,9 +279,13 @@ class PolarDataPreprocessor:
         traces_lf = load_traces(input_path)
         metrics_lf = load_metrics(input_path)
 
+        # Compute trace duration metrics and combine with regular metrics
+        trace_duration_metrics = compute_trace_duration_metrics(traces_lf)
+        combined_metrics_lf = pl.concat([metrics_lf, trace_duration_metrics])
+
         # Convert to TraStrainer format
         traces = self._convert_traces(traces_lf)
-        metrics = self._convert_metrics(metrics_lf)
+        metrics = self._convert_metrics(combined_metrics_lf)
 
         logger.info(f"Loaded {len(traces)} traces and {len(metrics)} metric series")
         return traces, metrics
