@@ -90,6 +90,15 @@ def load_metrics(input_folder: Path) -> pl.LazyFrame:
     anomal_metrics = pl.scan_parquet(input_folder / "abnormal_metrics.parquet")
     lf = merge_two_time_ranges(normal_metrics, anomal_metrics)
 
+    # Filter to only include specified K8s pod metrics
+    target_metrics = [
+        "k8s.pod.cpu_limit_utilization",
+        "k8s.pod.memory_limit_utilization",
+        "k8s.pod.memory.usage",
+        "k8s.pod.cpu.usage",
+    ]
+    lf = lf.filter(pl.col("metric").is_in(target_metrics))
+
     # Apply unit conversions
     lf = process_metric_units(lf)
 
@@ -97,16 +106,6 @@ def load_metrics(input_folder: Path) -> pl.LazyFrame:
     lf = lf.select(["time", "metric", "value", "service_name"])
 
     return lf
-
-
-def is_special_constant_metric(metric: str) -> bool:
-    """Check if metric is a special constant metric"""
-    return metric in (
-        "k8s.container.cpu_request",
-        "k8s.container.memory_request",
-        "k8s.container.cpu_limit",
-        "k8s.container.memory_limit",
-    )
 
 
 def process_metric_units(lf: pl.LazyFrame) -> pl.LazyFrame:
@@ -148,27 +147,6 @@ def load_metrics_histogram(input_folder: Path) -> pl.LazyFrame:
     return lf
 
 
-def ui_span_name_parser(df: pl.DataFrame) -> pl.DataFrame:
-    """Parse UI dashboard span names by replacing with child span names"""
-    # Create a mapping from parent span ID to child span name
-    child_mapping = df.select(["parent_span_id", "span_name"]).rename(
-        {"parent_span_id": "span_id", "span_name": "child_span_name"}
-    )
-
-    # Join with original dataframe
-    merged_df = df.join(child_mapping, on="span_id", how="left")
-
-    # Replace span names for ts-ui-dashboard service with child span names
-    processed_df = merged_df.with_columns(
-        pl.when(pl.col("service_name") == "ts-ui-dashboard")
-        .then(pl.col("child_span_name"))
-        .otherwise(pl.col("span_name"))
-        .alias("span_name")
-    ).drop("child_span_name")
-
-    return processed_df
-
-
 @timeit()
 def load_traces(input_folder: Path) -> pl.LazyFrame:
     """Load trace data from Parquet files"""
@@ -188,10 +166,6 @@ def load_traces(input_folder: Path) -> pl.LazyFrame:
         pl.col("attr.http.response.content_length").cast(pl.Float64),
     )
 
-    # Apply UI span name parsing
-    df = lf.collect()
-    df = ui_span_name_parser(df)
-    lf = df.lazy()
     lf = tt_add_op_name(lf)
 
     return lf

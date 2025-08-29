@@ -126,7 +126,7 @@ class TraStrainer(Algorithm):
 
     def needs_cpu_count(self) -> int | None:
         """Return required CPU count (None means no specific requirement)"""
-        return 2  # TraStrainer can benefit from 2 CPUs for parallel processing
+        return 4  # TraStrainer can benefit from 2 CPUs for parallel processing
 
     def __call__(self, args: AlgorithmArgs) -> List[AlgorithmAnswer]:
         """

@@ -29,7 +29,7 @@ class TraStrainerSampler(TraceSampler):
 
     def needs_cpu_count(self) -> int | None:
         """Return number of CPU cores needed."""
-        return 1  # TraStrainer can run on single core
+        return 4  # TraStrainer can run on single core
 
     def __call__(self, args: SamplerArgs) -> List[SampleResult]:
         """
