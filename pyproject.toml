@@ -7,7 +7,7 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "polars>=1.31.0",
-    "rcabench-platform==0.3.31a1",
+    "rcabench-platform==0.3.31b1",
     "numpy",
     "matplotlib",
     "pandas",

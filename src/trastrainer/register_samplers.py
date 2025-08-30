@@ -20,4 +20,5 @@ def register_samplers():
     registry["sieve"] = SieveSampler
     registry["wt"] = WTSampler
 
-
+if __name__ != "__main__":
+    register_samplers()
