@@ -101,10 +101,39 @@ class TraStrainerSampler(TraceSampler):
                     return []
 
             elif args.mode == SamplingMode.OFFLINE:
-                # Offline mode: strict top-K sampling
-                results.sort(key=lambda x: x.sample_score, reverse=True)
-                sampled_results = results[:target_count]
-                logger.info(f"TraStrainer Offline: sampled={len(sampled_results)}")
+                # Offline mode: sequential sampling with early exit when budget reached
+                # Process traces in order and sample based on combined score threshold
+                # This matches the original TraStrainer offline sampling logic
+
+                # Sort results by trace processing order (not by score)
+                # to maintain temporal sequence
+                trace_order = list(traces.keys())
+                ordered_results = []
+                for trace_id in trace_order:
+                    if trace_id in trace_scores:
+                        ordered_results.append(
+                            SampleResult(
+                                trace_id=trace_id, sample_score=trace_scores[trace_id]
+                            )
+                        )
+
+                # Calculate budget for total traces
+                total_budget = int(round(args.sampling_rate * len(traces)))
+
+                # Sequential sampling with score threshold
+                sampled_results = []
+                for result in ordered_results:
+                    # Sample if combined score is above threshold (e.g., > 0.5)
+                    if result.sample_score > 0.5:  # Combined score threshold
+                        sampled_results.append(result)
+
+                        # Check if budget is reached
+                        if len(sampled_results) >= total_budget:
+                            break
+
+                logger.info(
+                    f"TraStrainer Offline: processed={len(ordered_results)}, sampled={len(sampled_results)}, budget={total_budget}"
+                )
                 return sampled_results
 
             return results

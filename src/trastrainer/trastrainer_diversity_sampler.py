@@ -97,11 +97,67 @@ class TraStrainerDiversitySampler(TraceSampler):
                     return []
 
             elif args.mode == SamplingMode.OFFLINE:
-                # Offline mode: strict top-K sampling
-                results.sort(key=lambda x: x.sample_score, reverse=True)
-                sampled_results = results[:target_count]
+                # Offline mode: sequential sampling with early exit when budget reached
+                # Process traces in temporal order and sample based on diversity score threshold
+                # This matches the original TraStrainer offline sampling logic
+
+                # Get preprocessor's inject time to separate normal/abnormal periods
+                inject_time = preprocessor.inject_time
+                if not inject_time:
+                    logger.warning(
+                        "No inject time found, treating all traces as normal period"
+                    )
+                    inject_time_str = "9999-12-31T23:59:59+00:00"  # Far future
+                else:
+                    inject_time_str = inject_time.isoformat()
+
+                # Separate traces into normal and abnormal periods
+                normal_traces = []
+                abnormal_traces = []
+
+                for trace_id, trace in traces.items():
+                    if trace_id in trace_scores:
+                        result = SampleResult(
+                            trace_id=trace_id, sample_score=trace_scores[trace_id]
+                        )
+                        if trace.start_time < inject_time_str:
+                            normal_traces.append(result)
+                        else:
+                            abnormal_traces.append(result)
+
+                # Calculate separate budgets for normal and abnormal periods
+                normal_budget = int(round(args.sampling_rate * len(normal_traces)))
+                abnormal_budget = int(round(args.sampling_rate * len(abnormal_traces)))
+
                 logger.info(
-                    f"TraStrainer Diversity Offline: sampled={len(sampled_results)}"
+                    f"Normal period: {len(normal_traces)} traces, budget={normal_budget}"
+                )
+                logger.info(
+                    f"Abnormal period: {len(abnormal_traces)} traces, budget={abnormal_budget}"
+                )
+
+                # Sequential sampling for normal period
+                normal_sampled = []
+                for result in normal_traces:
+                    if result.sample_score > 0.5:  # Diversity threshold
+                        normal_sampled.append(result)
+                        if len(normal_sampled) >= normal_budget:
+                            break
+
+                # Sequential sampling for abnormal period
+                abnormal_sampled = []
+                for result in abnormal_traces:
+                    if result.sample_score > 0.5:  # Diversity threshold
+                        abnormal_sampled.append(result)
+                        if len(abnormal_sampled) >= abnormal_budget:
+                            break
+
+                # Combine results
+                sampled_results = normal_sampled + abnormal_sampled
+
+                logger.info(
+                    f"TraStrainer Diversity Offline: normal_sampled={len(normal_sampled)}/{normal_budget}, "
+                    f"abnormal_sampled={len(abnormal_sampled)}/{abnormal_budget}, total={len(sampled_results)}"
                 )
                 return sampled_results
 
