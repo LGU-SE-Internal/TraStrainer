@@ -29,7 +29,7 @@ class BaselineSampler(TraceSampler):
 
     def needs_cpu_count(self) -> int | None:
         """Return number of CPU cores needed."""
-        return 4
+        return 2
 
     def __call__(self, args: SamplerArgs) -> List[SampleResult]:
         """
