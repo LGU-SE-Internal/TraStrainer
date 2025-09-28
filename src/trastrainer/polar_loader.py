@@ -5,6 +5,7 @@ import json
 import math
 import shutil
 import time
+from datetime import timedelta
 from functools import wraps
 from pathlib import Path
 from typing import Dict, List, Tuple
@@ -247,6 +248,11 @@ class PolarDataPreprocessor:
             Path(input_folder) if isinstance(input_folder, str) else input_folder
         )
         self.original_input_folder = input_path
+
+        # Check if this is TracePicker data
+        if self._is_tracepicker_data(input_path):
+            return self._load_tracepicker_data(input_path)
+
         self.inject_time = load_inject_time(input_path)
 
         # Load raw data - 确保input_folder是Path对象
@@ -489,4 +495,128 @@ class PolarDataPreprocessor:
             metrics[key] = data_points
 
         logger.info(f"Converted {len(metrics)} metric series")
+        return metrics
+
+    def _is_tracepicker_data(self, input_folder: Path) -> bool:
+        """Check if data is from TracePicker dataset"""
+        metadata_path = input_folder / "metadata.json"
+        if metadata_path.exists():
+            try:
+                metadata = load_json(metadata_path)
+                return metadata.get("source") == "tracepicker"
+            except Exception:
+                pass
+        # Also check for TracePicker-specific files
+        return (input_folder / "normal_traces.parquet").exists()
+
+    def _load_tracepicker_data(
+        self, input_folder: Path
+    ) -> Tuple[Dict[str, TraceData], Dict[Tuple[str, str], List[Dict]]]:
+        """Load TracePicker converted data"""
+        logger.info("Loading TracePicker data format")
+
+        # TracePicker只有normal traces，abnormal是空的
+        normal_traces_path = input_folder / "normal_traces.parquet"
+        if not normal_traces_path.exists():
+            raise FileNotFoundError(
+                f"TracePicker data file not found: {normal_traces_path}"
+            )
+
+        traces_lf = pl.scan_parquet(normal_traces_path)
+        traces = self._convert_tracepicker_traces(traces_lf)
+
+        # 创建基础metrics（TraStrainer的一些算法可能需要）
+        metrics = self._create_synthetic_metrics(traces)
+
+        logger.info(f"Loaded {len(traces)} TracePicker traces with synthetic metrics")
+        return traces, metrics
+
+    def _convert_tracepicker_traces(self, lf: pl.LazyFrame) -> Dict[str, TraceData]:
+        """Convert TracePicker traces to TraStrainer format"""
+        logger.info("Converting TracePicker traces to TraStrainer format...")
+
+        df = lf.collect()
+        traces = {}
+
+        # 按trace_id分组
+        for trace_id_tuple, trace_group in df.group_by("trace_id"):
+            trace_id = str(trace_id_tuple[0])  # Convert to string
+
+            spans = []
+            for row in trace_group.iter_rows(named=True):
+                # TracePicker数据转换：从time和duration计算start_time和end_time
+                start_datetime = row["time"]
+                duration_microseconds = row["duration"] if row["duration"] else 0
+                end_datetime = start_datetime + timedelta(
+                    microseconds=duration_microseconds
+                )
+
+                span = TraceSpan(
+                    trace_id=trace_id,
+                    span_id=row["span_id"],
+                    parent_id=row.get("parent_span_id", "root") or "root",
+                    service_name=row["service_name"] or "unknown-service",
+                    operation_name=row.get("span_name", "unknown-operation")
+                    or "unknown-operation",
+                    start_time=start_datetime.isoformat()
+                    if hasattr(start_datetime, "isoformat")
+                    else str(start_datetime),
+                    end_time=end_datetime.isoformat()
+                    if hasattr(end_datetime, "isoformat")
+                    else str(end_datetime),
+                    duration=int(duration_microseconds) if duration_microseconds else 0,
+                    status="success",  # TracePicker数据都是正常的
+                )
+                spans.append(span)
+
+            # Sort spans by start time
+            spans.sort(key=lambda x: x.start_time)
+            traces[trace_id] = TraceData(trace_id=trace_id, spans=spans)
+
+        logger.info(f"Converted {len(traces)} TracePicker traces")
+        return traces
+
+    def _create_synthetic_metrics(
+        self, traces: Dict[str, TraceData]
+    ) -> Dict[Tuple[str, str], List[Dict]]:
+        """Create synthetic metrics for TracePicker data"""
+        metrics = {}
+
+        # 收集所有服务名
+        services = set()
+        for trace in traces.values():
+            for span in trace.spans:
+                services.add(span.service_name)
+
+        # 为每个服务创建基础metrics
+        base_metrics = [
+            "k8s.pod.cpu.usage",
+            "k8s.pod.cpu_limit_utilization",
+            "k8s.pod.memory.usage",
+            "k8s.pod.memory_limit_utilization",
+        ]
+
+        # 创建时间序列（基于TracePicker数据的时间范围）
+        import random
+
+        base_time = datetime.datetime(2024, 8, 2, 10, 50, 0)
+        time_points = []
+        for i in range(10):  # 创建10个时间点
+            time_points.append(base_time + datetime.timedelta(minutes=i))
+
+        for service in services:
+            for metric in base_metrics:
+                key = (service, metric)
+                data_points = []
+                for time_point in time_points:
+                    # 创建合理的默认值
+                    if "cpu" in metric:
+                        value = random.uniform(10.0, 80.0)  # CPU使用率
+                    else:  # memory
+                        value = random.uniform(100.0, 800.0)  # 内存使用量
+
+                    data_points.append({"date": time_point.isoformat(), "value": value})
+                metrics[key] = data_points
+
+        logger.info(f"Created synthetic metrics for {len(services)} services")
         return metrics

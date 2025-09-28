@@ -11,7 +11,7 @@ from rcabench_platform.v2.samplers.spec import (
     TraceSampler,
 )
 
-from .algorithm import FeatureExtractor, SimilarityCalculator
+from .algorithm import SimilarityCalculator
 from .data_structures import SamplingConfig
 from .polar_loader import PolarDataPreprocessor
 
@@ -98,74 +98,158 @@ class TraStrainerDiversitySampler(TraceSampler):
 
             elif args.mode == SamplingMode.OFFLINE:
                 # Offline mode: sequential sampling with early exit when budget reached
-                # Process traces in temporal order and sample based on diversity score threshold
-                # This matches the original TraStrainer offline sampling logic
+                # Handle TracePicker (normal-only) vs regular datasets
 
-                # Get preprocessor's inject time to separate normal/abnormal periods
-                inject_time = preprocessor.inject_time
-                if not inject_time:
-                    logger.warning(
-                        "No inject time found, treating all traces as normal period"
+                # Check if this is TracePicker data (normal-only)
+                is_tracepicker = self._is_tracepicker_data(args)
+
+                if is_tracepicker:
+                    # TracePicker: all traces are normal, no separation needed
+                    logger.info(
+                        "Detected TracePicker data - treating all traces as normal period"
                     )
-                    inject_time_str = "9999-12-31T23:59:59+00:00"  # Far future
+
+                    # Sort by diversity score for better sampling
+                    sorted_results = sorted(
+                        [
+                            SampleResult(trace_id=trace_id, sample_score=score)
+                            for trace_id, score in trace_scores.items()
+                        ],
+                        key=lambda x: x.sample_score,
+                        reverse=True,
+                    )
+
+                    # Sequential sampling with diversity threshold
+                    sampled_results = []
+                    for result in sorted_results:
+                        if result.sample_score > 0.3:  # Lower threshold for TracePicker
+                            sampled_results.append(result)
+                            if len(sampled_results) >= target_count:
+                                break
+
+                    logger.info(
+                        f"TraStrainer Diversity TracePicker Offline: sampled={len(sampled_results)}/{target_count}"
+                    )
+                    return sampled_results
+
                 else:
-                    inject_time_str = inject_time.isoformat()
-
-                # Separate traces into normal and abnormal periods
-                normal_traces = []
-                abnormal_traces = []
-
-                for trace_id, trace in traces.items():
-                    if trace_id in trace_scores:
-                        result = SampleResult(
-                            trace_id=trace_id, sample_score=trace_scores[trace_id]
+                    # Regular datasets: separate normal and abnormal periods
+                    inject_time = preprocessor.inject_time
+                    if not inject_time:
+                        logger.warning(
+                            "No inject time found, treating all traces as normal period"
                         )
-                        if trace.start_time < inject_time_str:
-                            normal_traces.append(result)
-                        else:
-                            abnormal_traces.append(result)
+                        inject_time_str = "9999-12-31T23:59:59+00:00"  # Far future
+                    else:
+                        inject_time_str = inject_time.isoformat()
 
-                # Calculate separate budgets for normal and abnormal periods
-                normal_budget = int(round(args.sampling_rate * len(normal_traces)))
-                abnormal_budget = int(round(args.sampling_rate * len(abnormal_traces)))
+                    # Separate traces into normal and abnormal periods
+                    normal_traces = []
+                    abnormal_traces = []
 
-                logger.info(
-                    f"Normal period: {len(normal_traces)} traces, budget={normal_budget}"
-                )
-                logger.info(
-                    f"Abnormal period: {len(abnormal_traces)} traces, budget={abnormal_budget}"
-                )
+                    for trace_id, trace in traces.items():
+                        if trace_id in trace_scores:
+                            result = SampleResult(
+                                trace_id=trace_id, sample_score=trace_scores[trace_id]
+                            )
+                            if trace.start_time < inject_time_str:
+                                normal_traces.append(result)
+                            else:
+                                abnormal_traces.append(result)
 
-                # Sequential sampling for normal period
-                normal_sampled = []
-                for result in normal_traces:
-                    if result.sample_score > 0.5:  # Diversity threshold
-                        normal_sampled.append(result)
-                        if len(normal_sampled) >= normal_budget:
-                            break
+                    # Calculate separate budgets for normal and abnormal periods
+                    normal_budget = int(round(args.sampling_rate * len(normal_traces)))
+                    abnormal_budget = int(
+                        round(args.sampling_rate * len(abnormal_traces))
+                    )
 
-                # Sequential sampling for abnormal period
-                abnormal_sampled = []
-                for result in abnormal_traces:
-                    if result.sample_score > 0.5:  # Diversity threshold
-                        abnormal_sampled.append(result)
-                        if len(abnormal_sampled) >= abnormal_budget:
-                            break
+                    logger.info(
+                        f"Normal period: {len(normal_traces)} traces, budget={normal_budget}"
+                    )
+                    logger.info(
+                        f"Abnormal period: {len(abnormal_traces)} traces, budget={abnormal_budget}"
+                    )
 
-                # Combine results
-                sampled_results = normal_sampled + abnormal_sampled
+                    # Sequential sampling for normal period
+                    normal_sampled = []
+                    for result in normal_traces:
+                        if result.sample_score > 0.5:  # Diversity threshold
+                            normal_sampled.append(result)
+                            if len(normal_sampled) >= normal_budget:
+                                break
 
-                logger.info(
-                    f"TraStrainer Diversity Offline: normal_sampled={len(normal_sampled)}/{normal_budget}, "
-                    f"abnormal_sampled={len(abnormal_sampled)}/{abnormal_budget}, total={len(sampled_results)}"
-                )
-                return sampled_results
+                    # Sequential sampling for abnormal period
+                    abnormal_sampled = []
+                    for result in abnormal_traces:
+                        if result.sample_score > 0.5:  # Diversity threshold
+                            abnormal_sampled.append(result)
+                            if len(abnormal_sampled) >= abnormal_budget:
+                                break
+
+                    # Combine results
+                    sampled_results = normal_sampled + abnormal_sampled
+
+                    logger.info(
+                        f"TraStrainer Diversity Offline: normal_sampled={len(normal_sampled)}/{normal_budget}, "
+                        f"abnormal_sampled={len(abnormal_sampled)}/{abnormal_budget}, total={len(sampled_results)}"
+                    )
+                    return sampled_results
 
             return results
 
         except Exception as e:
             logger.error(f"TraStrainer Diversity sampler failed: {e}")
             return []
+
+    def _is_tracepicker_data(self, args) -> bool:
+        """Check if data is from TracePicker dataset"""
+        # Check dataset name or presence of TracePicker-specific files
+        if hasattr(args, "dataset") and args.dataset == "tracepicker":
+            return True
+
+        # Check for TracePicker-specific files
+        if (
+            hasattr(args, "input_folder")
+            and (args.input_folder / "normal_traces.parquet").exists()
+        ):
+            return True
+
+        # Check metadata
+        if hasattr(args, "input_folder"):
+            metadata_path = args.input_folder / "metadata.json"
+            if metadata_path.exists():
+                try:
+                    import json
+
+                    with open(metadata_path, "r") as f:
+                        metadata = json.load(f)
+                    return metadata.get("source") == "tracepicker"
+                except Exception:
+                    pass
+
+        return False
+
+    def _extract_simple_structure(self, trace_data) -> list:
+        """Extract simple trace structure for TracePicker data"""
+        try:
+            # Use service call sequence as structure
+            services = []
+            for span in sorted(trace_data.spans, key=lambda x: x.start_time):
+                services.append(span.service_name)
+
+            # Remove consecutive duplicates to get call path
+            structure = []
+            prev_service = None
+            for service in services:
+                if service != prev_service:
+                    structure.append(service)
+                    prev_service = service
+
+            return structure if structure else ["unknown"]
+
+        except Exception as e:
+            logger.debug(f"Error extracting structure: {e}")
+            return ["unknown"]
 
     def _compute_diversity_scores(self, traces: dict, config: SamplingConfig) -> dict:
         """
@@ -179,11 +263,6 @@ class TraStrainerDiversitySampler(TraceSampler):
             Dictionary mapping trace_id to diversity_score
         """
         from collections import deque
-
-        from .preprocessor import TraceProcessor
-
-        # Initialize TraStrainer components
-        feature_extractor = FeatureExtractor()
 
         # Initialize tracking variables for debugging
         trace_scores = {}
@@ -201,29 +280,11 @@ class TraStrainerDiversitySampler(TraceSampler):
         # Process each trace to compute diversity scores
         for trace_id, trace in traces.items():
             try:
-                # Build trace tree and extract features
-                tree = TraceProcessor.build_trace_tree(trace.spans)
-
-                # Skip invalid traces
-                if not tree.size():
-                    trace_scores[trace_id] = 0.0
-                    skipped_invalid_tree += 1
-                    continue
-
-                if tree.size() != len(trace.spans):
-                    trace_scores[trace_id] = 0.0
-                    skipped_tree_size_mismatch += 1
-                    continue
-
-                # Extract trace structure
-                trace_structure = feature_extractor.get_trace_structure_vector(
-                    trace, tree
-                )
+                # Use simplified structure extraction for TracePicker compatibility
+                trace_structure = self._extract_simple_structure(trace)
 
                 # Compute diversity score after warm-up
-                if processed_count >= max(
-                    config.warm_up_size, 10
-                ):  # Ensure at least 10 traces for comparison
+                if processed_count >= max(config.warm_up_size, 10):
                     diversity_score = self._compute_diversity_rate(
                         history_structures, trace_structure, diversity_window
                     )
